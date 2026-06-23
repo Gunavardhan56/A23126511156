@@ -7,7 +7,7 @@ Headers: `Authorization: Bearer <token>`
 Query params: `page`, `limit`, `notification_type`
 
 Response:
-```json
+
 {
   "notifications": [
     { "ID": "uuid", "Type": "Placement", "Message": "Amazon Hiring", "Timestamp": "2026-04-22 17:51:30" }
@@ -16,7 +16,7 @@ Response:
   "page": 1,
   "limit": 10
 }
-```
+
 
 ---
 
@@ -24,9 +24,9 @@ Response:
 Headers: `Authorization: Bearer <token>`
 
 Response:
-```json
+
 { "ID": "uuid", "Type": "Result", "Message": "mid-sem", "Timestamp": "2026-04-22 17:51:30" }
-```
+
 
 ---
 
@@ -55,13 +55,13 @@ Response: `{ "count": 12 }`
 Headers: `Authorization: Bearer <token>`
 
 Response:
-```json
+
 {
   "notifications": [
     { "ID": "uuid", "Type": "Placement", "Message": "CSX Corporation hiring", "Timestamp": "2026-04-22 17:51:18" }
   ]
 }
-```
+
 
 ---
 
@@ -79,7 +79,7 @@ Chosen because notifications have a fixed schema, we need indexed queries, and A
 
 ## Schema
 
-```sql
+
 CREATE TYPE notification_type AS ENUM ('Placement', 'Result', 'Event');
 
 CREATE TABLE students (
@@ -96,7 +96,7 @@ CREATE TABLE notifications (
   is_read    BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
-```
+
 
 ## Scaling Problems and Solutions
 
@@ -110,16 +110,16 @@ Fixes:
 ## Queries
 
 Fetch paginated:
-```sql
+
 SELECT id, type, message, is_read, created_at FROM notifications
 WHERE student_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3;
-```
+
 
 Filter by type:
-```sql
+
 SELECT id, type, message, created_at FROM notifications
 WHERE student_id = $1 AND type = $2 ORDER BY created_at DESC LIMIT $3 OFFSET $4;
-```
+
 
 Mark as read: `UPDATE notifications SET is_read = TRUE WHERE id = $1;`
 
@@ -134,33 +134,33 @@ Unread count: `SELECT COUNT(*) FROM notifications WHERE student_id = $1 AND is_r
 ## Query Analysis
 
 Original query:
-```sql
+
 SELECT * FROM notifications
 WHERE studentID = 1042 AND isRead = false
 ORDER BY createdAt ASC;
-```
+
 
 **Is it accurate?** Yes functionally, but `SELECT *` is wasteful — fetches unused columns.
 
 **Why is it slow?** No index on `(studentID, isRead, createdAt)`. With 5M rows this does a full table scan — O(N).
 
 **Fix:**
-```sql
+
 CREATE INDEX idx_notif_student_unread ON notifications (student_id, is_read, created_at);
 
 SELECT id, type, message, created_at FROM notifications
 WHERE student_id = 1042 AND is_read = false
 ORDER BY created_at ASC;
-```
+
 Cost drops from O(N) to O(log N + results).
 
 **Should you index every column?** No. Each index adds overhead on every INSERT and UPDATE. Too many indexes slow down writes and waste disk. Only index columns used in WHERE, ORDER BY, or JOIN.
 
 **Students who got a Placement notification in the last 7 days:**
-```sql
+
 SELECT DISTINCT student_id FROM notifications
 WHERE type = 'Placement' AND created_at >= NOW() - INTERVAL '7 days';
-```
+
 
 ---
 
@@ -198,13 +198,13 @@ Best approach: SSE for updates + Redis for the initial load.
 
 ## Problems with Original `notify_all`
 
-```
+
 function notify_all(student_ids, message):
     for student_id in student_ids:
         send_email(student_id, message)
         save_to_db(student_id, message)
         push_to_app(student_id, message)
-```
+
 
 1. **Sequential** — 50k students one by one ≈ 83 minutes at 100ms each.
 2. **No retry** — email failed for 200 students, silently skipped, no record.
@@ -215,7 +215,7 @@ function notify_all(student_ids, message):
 
 ## Redesigned Pseudocode
 
-```
+
 function notify_all(student_ids, message):
     for student_id in student_ids:
         enqueue("jobs", { student_id, message })
@@ -235,7 +235,7 @@ function worker():
         ok = send_email(job.student_id, job.message)
         if not ok:
             enqueue("email_retry", job)
-```
+
 
 Parallel workers reduce 83 min to seconds. DB and email are decoupled. Failed emails retry without losing the DB record.
 
@@ -250,7 +250,7 @@ Priority scoring: Placement = 3, Result = 2, Event = 1. Sort by score descending
 Backend exposes `GET /api/notifications/priority?limit=10`. It fetches from the evaluation service, sorts using the priority logic, and returns the top N.
 
 **Sorting code:**
-```js
+
 const PRIORITY = { Placement: 3, Result: 2, Event: 1 };
 
 function getTopN(notifications, n = 10) {
@@ -263,7 +263,7 @@ function getTopN(notifications, n = 10) {
     })
     .slice(0, n);
 }
-```
+
 
 **Maintaining top N as new notifications arrive:**
 Use a min-heap of size N. On each new notification: if heap size < N push it in; else if its score > heap minimum, replace the minimum. Each insert is O(log N) vs O(M log M) for full re-sort.
