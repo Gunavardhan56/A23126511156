@@ -238,3 +238,32 @@ function worker():
 ```
 
 Parallel workers reduce 83 min to seconds. DB and email are decoupled. Failed emails retry without losing the DB record.
+
+---
+
+# Stage 6
+
+## Priority Inbox
+
+Priority scoring: Placement = 3, Result = 2, Event = 1. Sort by score descending, then by timestamp descending. Take top N.
+
+Backend exposes `GET /api/notifications/priority?limit=10`. It fetches from the evaluation service, sorts using the priority logic, and returns the top N.
+
+**Sorting code:**
+```js
+const PRIORITY = { Placement: 3, Result: 2, Event: 1 };
+
+function getTopN(notifications, n = 10) {
+  return notifications
+    .slice()
+    .sort((a, b) => {
+      const diff = (PRIORITY[b.Type] || 0) - (PRIORITY[a.Type] || 0);
+      if (diff !== 0) return diff;
+      return new Date(b.Timestamp) - new Date(a.Timestamp);
+    })
+    .slice(0, n);
+}
+```
+
+**Maintaining top N as new notifications arrive:**
+Use a min-heap of size N. On each new notification: if heap size < N push it in; else if its score > heap minimum, replace the minimum. Each insert is O(log N) vs O(M log M) for full re-sort.
